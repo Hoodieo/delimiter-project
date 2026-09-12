@@ -3,7 +3,6 @@
    - Operator yang didukung: + - * :
    - Pembagian menggunakan ':' menghasilkan 1 desimal jika bukan integer, dengan koma sebagai pemisah desimal.
    - Fitur download dihapus.
-   - Tambahan: sum[], avg[], Hsum[], Havg[], Vsum[], Vavg[] untuk agregat.
 */
 
 document.addEventListener('DOMContentLoaded', function () {
@@ -57,20 +56,27 @@ document.addEventListener('DOMContentLoaded', function () {
 
   // ---------------------------
   // New: helpers untuk evaluasi ekspresi di dalam [ ... ]
+  // - makeTermFromBracket: buat fungsi suku t(n) dari string (mengizinkan 'n' dan angka)
+  // - evaluateInfiniteSeries: hitung sum atau product tak hingga (numerik, sinkron)
   // ---------------------------
 
   function makeTermFromBracket(expr, context = {}) {
     if (typeof expr !== 'string') throw new Error('expr harus string');
+    // hanya izinkan karakter aman: angka, huruf n, spasi, operator, titik, tanda kurung, koma, ^, dan ':'
+    // (kita tidak mengizinkan akses ke Math atau objek lain)
     const safePattern = /^[0-9n+\-*/():.\s^,_a-zA-Z]+$/;
     if (!safePattern.test(expr)) throw new Error('Ekspresi mengandung karakter tidak diizinkan');
 
+    // terjemahkan notasi: ':' -> '/', '^' -> '**'
     const jsExpr = expr.replace(/:/g, '/').replace(/\^/g, '**');
 
+    // hanya variabel yang diizinkan: 'n' dan variabel dari context (biasanya tidak ada)
     const varNames = Object.keys(context);
     const params = ['n', ...varNames];
 
     let fn;
     try {
+      // Buat fungsi dinamis: function(n, a, b, ...) { return <jsExpr>; }
       fn = new Function(...params, 'return ' + jsExpr + ';');
     } catch (e) {
       throw new Error('Ekspresi tidak valid: ' + e.message);
@@ -97,12 +103,14 @@ document.addEventListener('DOMContentLoaded', function () {
         s += t;
         if (Math.abs(s - prev) < tol) return s;
         prev = s;
+        // deteksi divergensi praktis: suku besar terus setelah banyak iterasi
         if (n > 10000 && Math.abs(t) > 1e6) throw new Error('Kemungkinan divergen (suku besar terus)');
       }
       throw new Error('Max iterasi tercapai; deret mungkin divergen atau toleransi terlalu kecil');
     }
 
     if (type === 'prod') {
+      // coba gunakan log-sum bila faktor positif untuk stabilitas
       let useLog = true;
       for (let n = start; n < start + 20; n++) {
         const f = termFunc(n);
@@ -137,10 +145,14 @@ document.addEventListener('DOMContentLoaded', function () {
     throw new Error('Tipe tidak dikenali: ' + type);
   }
 
+  // computeWithInfinitySupport sinkron untuk penggunaan internal:
+  // - jika type === 'single' -> evaluasi suku pada n = start
+  // - jika type === 'sum' -> hitung sum tak hingga (sinkron)
   function computeWithInfinitySupportSync(inputExpr, context = {}, opts = {}) {
     const { type = 'sum', start = 0, tol = 1e-12, maxIter = 100000 } = opts;
     let expr = String(inputExpr).trim();
     if (expr.startsWith('[') && expr.endsWith(']')) expr = expr.slice(1, -1).trim();
+    // buat termFunc
     const termFunc = makeTermFromBracket(expr, context);
     if (type === 'single') {
       return termFunc(start);
@@ -148,11 +160,16 @@ document.addEventListener('DOMContentLoaded', function () {
     return evaluateInfiniteSeries({ type, termFunc, start, tol, maxIter });
   }
 
+  // expose minimal function globally if needed (tidak wajib)
   if (typeof window !== 'undefined') window.computeWithInfinitySupportSync = computeWithInfinitySupportSync;
 
   // ---------------------------
-  // Tokenizer & evaluator untuk banyak operand (sebelumnya)
+  // Modifikasi evaluateSimpleExpression:
+  // - Jika ekspresi mengandung 'n' -> coba hitung sum tak hingga (sinkron)
+  // - Jika tidak -> dukung banyak operand seperti [2+2+50+30] -> 84
   // ---------------------------
+
+  // Tokenize expression into numbers and operators (supports unary minus)
   function tokenizeExpression(s) {
     const tokens = [];
     let i = 0;
@@ -160,18 +177,23 @@ document.addEventListener('DOMContentLoaded', function () {
     while (i < len) {
       const ch = s[i];
       if (ch === ' ' || ch === '\t') { i++; continue; }
+      // operator
       if (ch === '+' || ch === '*' || ch === ':' ) {
         tokens.push({ type: 'op', value: ch });
         i++; continue;
       }
       if (ch === '-') {
+        // could be unary minus if at start or after another operator
         const prev = tokens.length ? tokens[tokens.length - 1] : null;
         if (!prev || (prev.type === 'op')) {
+          // parse number with leading minus
           let j = i + 1;
           let numStr = '-';
+          let dotCount = 0;
           while (j < len) {
             const c = s[j];
             if ((c >= '0' && c <= '9') || c === ',' || c === '.') {
+              if (c === '.' || c === ',') dotCount++;
               numStr += c;
               j++;
             } else break;
@@ -181,10 +203,12 @@ document.addEventListener('DOMContentLoaded', function () {
           i = j;
           continue;
         } else {
+          // binary minus
           tokens.push({ type: 'op', value: '-' });
           i++; continue;
         }
       }
+      // number (digits, dot or comma)
       if ((ch >= '0' && ch <= '9') || ch === '.' || ch === ',') {
         let j = i;
         let numStr = '';
@@ -199,13 +223,16 @@ document.addEventListener('DOMContentLoaded', function () {
         i = j;
         continue;
       }
+      // any other character -> invalid for simple numeric expression
       return null;
     }
     return tokens;
   }
 
+  // Evaluate token list with precedence: first * and :, then + and -
   function evalTokenList(tokens) {
     if (!Array.isArray(tokens) || tokens.length === 0) return null;
+    // convert number strings to numeric values
     const vals = [];
     for (let t of tokens) {
       if (t.type === 'num') {
@@ -216,53 +243,62 @@ document.addEventListener('DOMContentLoaded', function () {
         vals.push(t);
       }
     }
+    // first pass: handle * and :
     let i = 0;
+    const pass1 = [];
     while (i < vals.length) {
       const cur = vals[i];
       if (cur.type === 'num') {
+        // lookahead for * or :
         const nextOp = vals[i + 1];
         if (nextOp && nextOp.type === 'op' && (nextOp.value === '*' || nextOp.value === ':')) {
           const right = vals[i + 2];
           if (!right || right.type !== 'num') return null;
           let res;
           if (nextOp.value === '*') res = cur.value * right.value;
-          else {
+          else { // division
             if (right.value === 0) return NaN;
             res = cur.value / right.value;
           }
+          // replace current triple with result and continue (may chain)
           vals.splice(i, 3, { type: 'num', value: res });
+          // do not increment i, re-evaluate at same position (to handle chaining like a * b * c)
           continue;
         } else {
+          pass1.push(cur);
           i++;
         }
       } else {
+        // operator + or - (or unexpected)
+        pass1.push(cur);
         i++;
       }
     }
-    if (vals.length === 0) return null;
-    if (vals[0].type !== 'num') return null;
-    let acc = vals[0].value;
+
+    // second pass: handle + and - left-to-right
+    if (pass1.length === 0) return null;
+    // must start with number
+    if (pass1[0].type !== 'num') return null;
+    let acc = pass1[0].value;
     i = 1;
-    while (i < vals.length) {
-      const op = vals[i];
-      const right = vals[i + 1];
+    while (i < pass1.length) {
+      const op = pass1[i];
+      const right = pass1[i + 1];
       if (!op || !right || op.type !== 'op' || right.type !== 'num') return null;
       if (op.value === '+') acc = acc + right.value;
       else if (op.value === '-') acc = acc - right.value;
-      else return null;
+      else return null; // unexpected operator here
       i += 2;
     }
     return acc;
   }
 
-  // ---------------------------
-  // evaluateSimpleExpression: mendukung n (deret) dan banyak operand
-  // ---------------------------
   function evaluateSimpleExpression(expr) {
     if (typeof expr !== 'string') return null;
     const s = expr.trim();
     if (s.length === 0) return null;
 
+    // jika mengandung 'n' -> deret tak hingga (sum)
     if (/\bn\b/.test(s)) {
       try {
         const val = computeWithInfinitySupportSync('[' + s + ']', {}, { type: 'sum' });
@@ -272,18 +308,25 @@ document.addEventListener('DOMContentLoaded', function () {
       }
     }
 
+    // tokenisasi untuk mendukung banyak operand, unary minus, dan operator + - * :
     const tokens = tokenizeExpression(s);
     if (!tokens) return null;
+
+    // validate tokens sequence: must alternate num op num op ...
     if (tokens.length === 0) return null;
+    // quick check: first token must be num
     if (tokens[0].type !== 'num') return null;
 
+    // evaluate with precedence
     const numericResult = evalTokenList(tokens);
     if (numericResult === null) return null;
     if (!isFinite(numericResult)) return null;
 
+    // If original expression contained ':' (division) and no 'n', format division style (1 decimal, comma)
     if (s.indexOf(':') !== -1) {
       return formatDivisionResult(numericResult);
     }
+    // otherwise normal numeric formatting
     return formatNumericResult(numericResult);
   }
 
@@ -530,72 +573,17 @@ document.addEventListener('DOMContentLoaded', function () {
     const rows = Array.from(table.querySelectorAll('tbody tr'));
     const outLines = [];
 
-    // Build rawTexts matrix and aggFlags matrix
-    const rawMatrix = rows.map(tr => {
-      const tds = Array.from(tr.querySelectorAll('td'));
-      return tds.map(td => td.textContent.replace(/\r/g,'').replace(/\n+/g,' ').trim());
-    });
-
-    const aggMatrix = rawMatrix.map(row => row.map(cellText => {
-      const low = String(cellText).trim().toLowerCase();
-      if (low === 'sum[]') return 'Hsum';
-      if (low === 'avg[]') return 'Havg';
-      if (low === 'hsum[]') return 'Hsum';
-      if (low === 'havg[]') return 'Havg';
-      if (low === 'vsum[]') return 'Vsum';
-      if (low === 'vavg[]') return 'Vavg';
-      return null;
-    }));
-
-    // First pass: process non-aggregate cells (evaluate bracket expressions)
-    const processedMatrix = rawMatrix.map((row, ri) => row.map((cellText, ci) => {
-      if (aggMatrix[ri][ci]) return null; // placeholder for aggregate
-      return processBracketExpressions(cellText);
-    }));
-
-    // Helper: collect numeric values from an array of processed strings
-    function collectNumericFromArray(arr) {
-      const nums = [];
-      arr.forEach(v => {
-        if (v === null || v === undefined) return;
-        const n = parseNumberString(String(v));
-        if (!isNaN(n)) nums.push(n);
-      });
-      return nums;
-    }
-
-    // Precompute column-wise numeric values for Vsum/Vavg (exclude aggregate cells)
-    const cols = headerCols;
-    const colNumericValues = [];
-    for (let c = 0; c < cols; c++) {
-      const colVals = [];
-      for (let r = 0; r < processedMatrix.length; r++) {
-        if (!processedMatrix[r]) continue;
-        // skip aggregate cells
-        if (aggMatrix[r][c]) continue;
-        const v = processedMatrix[r][c];
-        if (v === null || v === undefined) continue;
-        const n = parseNumberString(String(v));
-        if (!isNaN(n)) colVals.push(n);
-      }
-      colNumericValues.push(colVals);
-    }
-
-    // Now compute final cells row by row
-    for (let r = 0; r < rawMatrix.length; r++) {
-      const row = rawMatrix[r];
-      // if this row is an "empty" single-cell row (colspan), handle separately
-      const tr = rows[r];
+    rows.forEach(tr=>{
       const emptyCell = tr.querySelector('td[data-empty-row="true"]');
-      if (emptyCell) {
+      if(emptyCell){
         const txtRaw = emptyCell.textContent.replace(/\r/g,'').replace(/\n+/g,' ').trim();
         const txtProcessed = processBracketExpressions(txtRaw);
-        if (txtProcessed === '') {
+        if(txtProcessed === ''){
           outLines.push('');
         } else {
           const currentDelim = getSelectedDelimiter();
           const delimForCheck = currentDelim === '\t' ? '\t' : currentDelim;
-          if (txtProcessed.includes(delimForCheck)) {
+          if(txtProcessed.includes(delimForCheck)){
             const parts = splitLine(txtProcessed, currentDelim);
             while(parts.length < headerCols) parts.push('');
             outLines.push(trimAll(parts).join(currentDelim));
@@ -605,68 +593,20 @@ document.addEventListener('DOMContentLoaded', function () {
             outLines.push(trimAll(parts).join(currentDelim));
           }
         }
-        continue;
-      }
-
-      // For normal rows:
-      const finalCells = [];
-      // collect numeric values for this row (exclude aggregate cells)
-      const rowNumericValues = collectNumericFromArray(processedMatrix[r]);
-
-      for (let c = 0; c < headerCols; c++) {
-        const aggType = aggMatrix[r][c];
-        if (!aggType) {
-          // non-aggregate: processedMatrix[r][c] may be null if something went wrong; convert to ''
-          const val = processedMatrix[r][c];
-          finalCells.push(val === null || val === undefined ? '' : String(val));
+      } else {
+        const tds = Array.from(tr.querySelectorAll('td'));
+        const cells = tds.map(td => {
+          const raw = td.textContent.replace(/\r/g,'').replace(/\n+/g,' ').trim();
+          return processBracketExpressions(raw);
+        });
+        const allEmpty = cells.every(c => c === '');
+        if(allEmpty){
+          outLines.push('');
         } else {
-          // aggregate cell
-          if (aggType === 'Hsum') {
-            if (rowNumericValues.length === 0) {
-              finalCells.push('');
-            } else {
-              const s = rowNumericValues.reduce((a,b)=>a+b, 0);
-              finalCells.push(formatNumericResult(s));
-            }
-          } else if (aggType === 'Havg') {
-            if (rowNumericValues.length === 0) {
-              finalCells.push('');
-            } else {
-              const s = rowNumericValues.reduce((a,b)=>a+b, 0);
-              const avg = s / rowNumericValues.length;
-              finalCells.push(formatNumericResult(avg));
-            }
-          } else if (aggType === 'Vsum') {
-            const colNums = colNumericValues[c] || [];
-            if (colNums.length === 0) {
-              finalCells.push('');
-            } else {
-              const s = colNums.reduce((a,b)=>a+b, 0);
-              finalCells.push(formatNumericResult(s));
-            }
-          } else if (aggType === 'Vavg') {
-            const colNums = colNumericValues[c] || [];
-            if (colNums.length === 0) {
-              finalCells.push('');
-            } else {
-              const s = colNums.reduce((a,b)=>a+b, 0);
-              const avg = s / colNums.length;
-              finalCells.push(formatNumericResult(avg));
-            }
-          } else {
-            // fallback: empty
-            finalCells.push('');
-          }
+          outLines.push(cells.join(getSelectedDelimiter()));
         }
       }
-
-      const allEmpty = finalCells.every(c => c === '' || c === null);
-      if (allEmpty) {
-        outLines.push('');
-      } else {
-        outLines.push(finalCells.join(getSelectedDelimiter()));
-      }
-    }
+    });
 
     return outLines.join('\n');
   }
