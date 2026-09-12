@@ -149,3 +149,31 @@ td:focus{box-shadow:0 0 0 3px rgba(11,116,255,0.08);border-radius:6px}
 
 /* accessibility focus */
 .radio:focus-within{box-shadow:0 0 0 3px rgba(11,116,255,0.08);border-radius:10px}
+
+/* Tombol Generate + Clear horizontal pada mobile portrait */
+@media (max-width: 600px) and (orientation: portrait) {
+  .action-row .left-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    justify-content: flex-start;
+    width: 100%;
+  }
+
+  .action-row .left-actions .btn {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0;
+  }
+}
+
+/* Center align caption teks pada tombol */
+.btn {
+  justify-content: center;
+  text-align: center;
+}
+
+/* Pastikan ikon atau elemen inline tidak menekan teks ke kiri */
+.btn > * {
+  margin: 0;
+}
