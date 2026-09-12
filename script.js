@@ -1,4 +1,10 @@
-/* script.js */
+/* script.js - lengkap
+   - Evaluasi hanya untuk pola di dalam tanda siku [ ... ].
+   - Operator yang didukung: + - * :
+   - Pembagian menggunakan ':' menghasilkan 1 desimal jika bukan integer, dengan koma sebagai pemisah desimal.
+   - Fitur download dihapus.
+*/
+
 document.addEventListener('DOMContentLoaded', function () {
   const inputText = document.getElementById('inputText');
   const generateBtn = document.getElementById('generateBtn');
@@ -7,12 +13,113 @@ document.addEventListener('DOMContentLoaded', function () {
   const rowCountEl = document.getElementById('rowCount');
   const colCountEl = document.getElementById('colCount');
   const copyBtnTop = document.getElementById('copyBtnTop');
-  const downloadBtnTop = document.getElementById('downloadBtnTop');
   const copyMsg = document.getElementById('copyMsg');
   const clearBtn = document.getElementById('clearBtn');
   const preset = document.getElementById('presetDelims');
   const customDelimInput = document.getElementById('customDelim');
 
+  // ---------- parsing helper (tanpa literal regex berisiko) ----------
+  function findOperatorIndex(s) {
+    const ops = ['+', '*', ':', '-'];
+    for (let i = 0; i < s.length; i++) {
+      const ch = s[i];
+      if (ops.indexOf(ch) !== -1) {
+        if (ch === '-' && i === 0) continue; // minus awal = tanda negatif
+        const left = s.slice(0, i).trim();
+        const right = s.slice(i + 1).trim();
+        if (left === '' || right === '') continue;
+        if (!/[0-9.]$/.test(left)) continue;
+        if (!/^[0-9.-]/.test(right)) continue;
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  function parseNumberString(numStr) {
+    if (typeof numStr !== 'string') return NaN;
+    const s = numStr.trim().replace(',', '.');
+    if (s === '') return NaN;
+    const n = parseFloat(s);
+    return Number.isFinite(n) ? n : NaN;
+  }
+
+  function formatDivisionResult(n) {
+    if (Number.isInteger(n)) return String(n);
+    return n.toFixed(1).replace('.', ',');
+  }
+
+  function formatNumericResult(n) {
+    if (Number.isInteger(n)) return String(n);
+    return parseFloat(n.toFixed(6)).toString();
+  }
+
+  function evaluateSimpleExpression(expr) {
+    if (typeof expr !== 'string') return null;
+    const s = expr.trim();
+    if (s.length === 0) return null;
+
+    const opIndex = findOperatorIndex(s);
+    if (opIndex === -1) return null;
+
+    const op = s[opIndex];
+    const leftRaw = s.slice(0, opIndex).trim();
+    const rightRaw = s.slice(opIndex + 1).trim();
+
+    const a = parseNumberString(leftRaw);
+    const b = parseNumberString(rightRaw);
+    if (isNaN(a) || isNaN(b)) return null;
+
+    let result;
+    switch (op) {
+      case '+':
+        result = a + b;
+        return formatNumericResult(result);
+      case '-':
+        result = a - b;
+        return formatNumericResult(result);
+      case '*':
+        result = a * b;
+        return formatNumericResult(result);
+      case ':': // pembagian sesuai permintaan
+        if (b === 0) return 'NaN';
+        result = a / b;
+        return formatDivisionResult(result);
+      default:
+        return null;
+    }
+  }
+
+  // Proses hanya pola [ ... ] — tidak menggunakan regex literal
+  function processBracketExpressions(text) {
+    if (typeof text !== 'string' || text.length === 0) return text;
+    let out = '';
+    let i = 0;
+    while (i < text.length) {
+      const openIdx = text.indexOf('[', i);
+      if (openIdx === -1) {
+        out += text.slice(i);
+        break;
+      }
+      out += text.slice(i, openIdx);
+      const closeIdx = text.indexOf(']', openIdx + 1);
+      if (closeIdx === -1) {
+        out += text.slice(openIdx);
+        break;
+      }
+      const inner = text.slice(openIdx + 1, closeIdx);
+      const evalResult = evaluateSimpleExpression(inner);
+      if (evalResult === null) {
+        out += '[' + inner + ']';
+      } else {
+        out += evalResult;
+      }
+      i = closeIdx + 1;
+    }
+    return out;
+  }
+
+  // ---------- delimiter & UI helpers ----------
   function getSelectedDelimiter(){
     const radios = document.querySelectorAll('input[name="delim"]');
     let val = '/';
@@ -50,12 +157,34 @@ document.addEventListener('DOMContentLoaded', function () {
     if (delim === '') return [line];
     return line.split(delim);
   }
-
   function trimAll(arr){
     return arr.map(s => s === undefined ? '' : String(s).trim());
   }
 
-  // keyboard helpers for editable cells
+  // caret helpers
+  function insertTextAtCaret(text) {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return;
+    const range = sel.getRangeAt(0);
+    range.deleteContents();
+    const node = document.createTextNode(text);
+    range.insertNode(node);
+    range.setStartAfter(node);
+    range.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+  function placeCaretAtEnd(el) {
+    el.focus();
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    range.collapse(false);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+
+  // keyboard navigation for cells
   function handleCellKeydown(ev, ri, ci) {
     if (ev.key === 'Enter') {
       if (ev.shiftKey) {
@@ -80,42 +209,12 @@ document.addEventListener('DOMContentLoaded', function () {
     }
   }
 
-  function insertTextAtCaret(text) {
-    const sel = window.getSelection();
-    if (!sel || !sel.rangeCount) return;
-    const range = sel.getRangeAt(0);
-    range.deleteContents();
-    const node = document.createTextNode(text);
-    range.insertNode(node);
-    range.setStartAfter(node);
-    range.collapse(true);
-    sel.removeAllRanges();
-    sel.addRange(range);
-  }
-
-  function placeCaretAtEnd(el) {
-    el.focus();
-    const range = document.createRange();
-    range.selectNodeContents(el);
-    range.collapse(false);
-    const sel = window.getSelection();
-    sel.removeAllRanges();
-    sel.addRange(range);
-  }
-
-  /**
-   * GENERATE TABLE
-   * - Tetap mempertahankan baris kosong (empty lines) dari input
-   * - Menentukan jumlah kolom berdasarkan baris header pertama yang tidak kosong
-   * - Baris kosong dibuat sebagai single-cell row dengan atribut data-empty-row="true"
-   */
+  // ---------- table generation ----------
   function generateTable(){
     copyMsg.textContent = '';
     const raw = inputText.value.replace(/\r/g,'');
-    // keep all lines including empty ones
     const rawLines = raw.split('\n');
 
-    // find first non-empty line to determine column count
     const firstNonEmptyIndex = rawLines.findIndex(l => l.trim() !== '');
     if(firstNonEmptyIndex === -1){
       tableWrap.innerHTML = '<div class="info" style="color:var(--muted)">Tidak ada teks. Paste teks panjang lalu klik Generate Table.</div>';
@@ -129,16 +228,13 @@ document.addEventListener('DOMContentLoaded', function () {
 
     const headerCols = splitLine(rawLines[firstNonEmptyIndex], delim).length;
 
-    // build internal representation preserving empty lines
     const parsedRows = rawLines.map(line => {
       if(line.trim() === '') return { type: 'empty' };
       const parts = splitLine(line, delim).map(p => p === undefined ? '' : String(p));
-      // pad to headerCols
       while(parts.length < headerCols) parts.push('');
       return { type: 'row', cells: trimAll(parts) };
     });
 
-    // build table DOM
     const table = document.createElement('table');
     const thead = document.createElement('thead');
     const trh = document.createElement('tr');
@@ -149,12 +245,11 @@ document.addEventListener('DOMContentLoaded', function () {
     }
     thead.appendChild(trh);
     table.appendChild(thead);
-
     const tbody = document.createElement('tbody');
+
     parsedRows.forEach((r, ri)=>{
       const tr = document.createElement('tr');
       if(r.type === 'empty'){
-        // single editable cell spanning all columns to represent an empty line
         const td = document.createElement('td');
         td.setAttribute('colspan', headerCols);
         td.contentEditable = 'true';
@@ -162,12 +257,8 @@ document.addEventListener('DOMContentLoaded', function () {
         td.dataset.emptyRow = 'true';
         td.dataset.row = ri;
         td.dataset.col = 0;
-        td.textContent = ''; // keep visually empty
-        // key handlers: Enter should move to next row, Shift+Enter insert newline
-        td.addEventListener('keydown', (ev)=>{
-          // treat as cell at column 0 for navigation
-          handleCellKeydown(ev, ri, 0);
-        });
+        td.textContent = '';
+        td.addEventListener('keydown', (ev)=>{ handleCellKeydown(ev, ri, 0); });
         td.addEventListener('paste', (ev)=>{
           ev.preventDefault();
           const text = (ev.clipboardData || window.clipboardData).getData('text');
@@ -183,9 +274,7 @@ document.addEventListener('DOMContentLoaded', function () {
           td.dataset.row = ri;
           td.dataset.col = ci;
           td.textContent = String(cell).replace(/\n+/g, ' ');
-          td.addEventListener('keydown', (ev)=>{
-            handleCellKeydown(ev, ri, ci);
-          });
+          td.addEventListener('keydown', (ev)=>{ handleCellKeydown(ev, ri, ci); });
           td.addEventListener('paste', (ev)=>{
             ev.preventDefault();
             const text = (ev.clipboardData || window.clipboardData).getData('text');
@@ -206,7 +295,6 @@ document.addEventListener('DOMContentLoaded', function () {
     colCountEl.textContent = headerCols;
 
     setTimeout(()=>{
-      // focus first editable cell
       const firstEditable = table.querySelector('td[contenteditable]');
       if(firstEditable) {
         firstEditable.focus();
@@ -216,7 +304,6 @@ document.addEventListener('DOMContentLoaded', function () {
   }
 
   function findCell(row, col){
-    // for empty-row cells we used col=0 and data-empty-row flag
     return document.querySelector('td[data-row="'+row+'"][data-col="'+col+'"]') ||
            document.querySelector('td[data-row="'+row+'"][data-empty-row="true"]');
   }
@@ -237,14 +324,7 @@ document.addEventListener('DOMContentLoaded', function () {
     copyMsg.textContent = '';
   });
 
-  /**
-   * BUILD OUTPUT TEXT
-   * - Untuk baris yang awalnya kosong (data-empty-row) dan tetap kosong => keluarkan baris kosong (preserve newline)
-   * - Jika user mengetik sesuatu di empty-row:
-   *    - Jika mengandung delimiter => split sesuai delimiter dan pad ke headerCols
-   *    - Jika tidak mengandung delimiter => treat as first cell, pad sisanya kosong
-   * - Untuk normal rows => join cells dengan delimiter
-   */
+  // ---------- build output and copy (hanya evaluasi isi dalam [..]) ----------
   function buildOutputText(){
     const delim = getSelectedDelimiter();
     const table = tableWrap.querySelector('table');
@@ -256,27 +336,29 @@ document.addEventListener('DOMContentLoaded', function () {
     rows.forEach(tr=>{
       const emptyCell = tr.querySelector('td[data-empty-row="true"]');
       if(emptyCell){
-        const txt = emptyCell.textContent.replace(/\r/g,'').replace(/\n+/g,' ').trim();
-        if(txt === ''){
-          // preserve blank line
+        const txtRaw = emptyCell.textContent.replace(/\r/g,'').replace(/\n+/g,' ').trim();
+        const txtProcessed = processBracketExpressions(txtRaw);
+        if(txtProcessed === ''){
           outLines.push('');
         } else {
-          // user typed into the empty-row: interpret content
-          if(txt.includes(getSelectedDelimiter() === '\t' ? '\t' : getSelectedDelimiter())){
-            const parts = splitLine(txt, getSelectedDelimiter());
+          const currentDelim = getSelectedDelimiter();
+          const delimForCheck = currentDelim === '\t' ? '\t' : currentDelim;
+          if(txtProcessed.includes(delimForCheck)){
+            const parts = splitLine(txtProcessed, currentDelim);
             while(parts.length < headerCols) parts.push('');
-            outLines.push(trimAll(parts).join(getSelectedDelimiter()));
+            outLines.push(trimAll(parts).join(currentDelim));
           } else {
-            // treat as first column value
-            const parts = [txt];
+            const parts = [txtProcessed];
             while(parts.length < headerCols) parts.push('');
-            outLines.push(trimAll(parts).join(getSelectedDelimiter()));
+            outLines.push(trimAll(parts).join(currentDelim));
           }
         }
       } else {
         const tds = Array.from(tr.querySelectorAll('td'));
-        const cells = tds.map(td => td.textContent.replace(/\r/g,'').replace(/\n+/g,' ').trim());
-        // if all cells empty, output empty line (preserve)
+        const cells = tds.map(td => {
+          const raw = td.textContent.replace(/\r/g,'').replace(/\n+/g,' ').trim();
+          return processBracketExpressions(raw);
+        });
         const allEmpty = cells.every(c => c === '');
         if(allEmpty){
           outLines.push('');
@@ -313,21 +395,6 @@ document.addEventListener('DOMContentLoaded', function () {
   }
 
   copyBtnTop.addEventListener('click', copyToClipboard);
-
-  function downloadText(){
-    const text = buildOutputText();
-    if(!text && text !== '') return;
-    const blob = new Blob([text], {type:'text/plain;charset=utf-8'});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'delimiter-output.txt';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-  }
-  downloadBtnTop.addEventListener('click', downloadText);
 
   // initial state
   activeDelimEl.textContent = '/';
