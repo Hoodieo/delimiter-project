@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>Delimiter Project Mobile</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app" role="application" aria-label="Delimiter Project Mobile">
+    <header>
+      <div style="flex:1">
+        <h1>Delimiter Project</h1>
+        <p>Paste teks, pilih delimiter, edit tabel, lalu salin hasilnya</p>
+      </div>
+    </header>
+
+    <main>
+      <div class="section">
+        <label for="inputText"><strong>Input Text</strong></label>
+        <textarea id="inputText" placeholder="Contoh: Agen/ Kd Toko / Qty&#10;Agen B/ TK001 / 10" aria-label="Input teks panjang"></textarea>
+
+        <div class="controls" style="margin-top:10px">
+          <div class="radios" id="presetDelims" role="radiogroup" aria-label="Pilih delimiter">
+            <label class="radio"><input type="radio" name="delim" value="/" checked> /</label>
+            <label class="radio"><input type="radio" name="delim" value=","> ,</label>
+            <label class="radio"><input type="radio" name="delim" value=";"> ;</label>
+            <label class="radio"><input type="radio" name="delim" value="tab"> Tab</label>
+            <label class="radio"><input type="radio" name="delim" value="custom"> Custom</label>
+          </div>
+
+          <input id="customDelim" class="custom-input" type="text" placeholder="Masukkan delimiter" aria-label="Delimiter custom" style="display:none" />
+        </div>
+
+        <!-- Generate and Clear aligned horizontally -->
+        <div class="action-row">
+          <div class="left-actions">
+            <button class="btn" id="generateBtn">Generate Table</button>
+            <button class="btn secondary" id="clearBtn">Clear</button>
+          </div>
+          <div class="meta" style="margin-top:0">
+            <div class="info"><strong>Delimiter aktif:</strong> <span id="activeDelim">/</span></div>
+            <div class="info"><strong>Baris:</strong> <span id="rowCount">0</span></div>
+            <div class="info"><strong>Kolom:</strong> <span id="colCount">0</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <label><strong>Preview Tabel</strong></label>
+
+        <!-- Copy & Download moved above the table -->
+        <div class="top-actions">
+          <button class="btn" id="copyBtnTop" aria-label="Copy to clipboard">Copy</button>
+          <button class="btn ghost" id="downloadBtnTop" aria-label="Download hasil">Download</button>
+          <div class="copy-msg" id="copyMsg" aria-live="polite"></div>
+        </div>
+
+        <div class="table-wrap" id="tableWrap" aria-live="polite">
+          <div class="info" style="color:var(--muted)">Tabel akan muncul setelah klik Generate Table</div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>

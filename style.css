@@ -1,0 +1,151 @@
+:root{
+  --bg:#f7fbff;
+  --card:#ffffff;
+  --accent:#0b74ff;
+  --muted:#6b7280;
+  --border:#e6eefc;
+  --success:#16a34a;
+  --danger:#ef4444;
+  --radius:12px;
+  --gap:12px;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;
+  font-family:Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+  background:linear-gradient(180deg,#eef6ff 0%,var(--bg) 100%);
+  color:#0f172a;
+  -webkit-font-smoothing:antialiased;
+  -moz-osx-font-smoothing:grayscale;
+  padding:16px;
+}
+
+.app{
+  max-width:980px;
+  margin:0 auto;
+  background:var(--card);
+  border-radius:16px;
+  box-shadow:0 8px 30px rgba(2,6,23,0.08);
+  border:1px solid var(--border);
+  overflow:hidden;
+  display:flex;
+  flex-direction:column;
+  min-height:70vh;
+}
+
+header{
+  padding:14px 16px;
+  display:flex;
+  align-items:center;
+  gap:12px;
+  border-bottom:1px solid var(--border);
+  background:linear-gradient(90deg, rgba(11,116,255,0.04), transparent);
+}
+header h1{font-size:16px;margin:0}
+header p{margin:0;font-size:13px;color:var(--muted)}
+
+main{padding:14px;flex:1;overflow:auto}
+.section{margin-bottom:14px}
+
+label{display:block;font-size:13px;color:var(--muted);margin-bottom:8px}
+textarea{
+  width:100%;
+  min-height:140px;
+  resize:vertical;
+  padding:12px;
+  border-radius:10px;
+  border:1px solid var(--border);
+  font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, "Roboto Mono", monospace;
+  font-size:14px;
+  background:#fff;
+}
+
+.controls{
+  display:flex;
+  gap:8px;
+  align-items:center;
+  flex-wrap:wrap;
+  margin-top:10px;
+}
+
+.radios{display:flex;gap:8px;flex-wrap:wrap}
+.radio{
+  display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:10px;border:1px solid var(--border);background:#fff;font-size:14px;cursor:pointer;
+}
+.radio input{width:18px;height:18px}
+
+.custom-input{
+  padding:10px;border-radius:10px;border:1px solid var(--border);min-width:120px;font-size:14px;
+}
+
+.btn{
+  background:var(--accent);
+  color:#fff;
+  border:none;
+  padding:10px 14px;
+  border-radius:10px;
+  cursor:pointer;
+  font-weight:600;
+  font-size:14px;
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+}
+.btn.ghost{background:transparent;color:var(--accent);border:1px solid var(--accent)}
+.btn.secondary{background:#fff;color:var(--accent);border:1px solid var(--border)}
+
+.meta{display:flex;gap:12px;align-items:center;margin-top:10px;flex-wrap:wrap}
+.meta .info{font-size:13px;color:var(--muted)}
+
+.table-wrap{
+  margin-top:12px;
+  border-radius:10px;
+  border:1px solid var(--border);
+  background:#fff;
+  padding:8px;
+  overflow:auto;
+  -webkit-overflow-scrolling:touch;
+}
+table{border-collapse:collapse;width:100%;min-width:600px}
+th,td{border:1px solid #eef6ff;padding:10px 12px;text-align:left;vertical-align:top;font-size:14px}
+th{background:#fbfdff;font-weight:700;color:#0f172a;position:sticky;top:0;z-index:1}
+td[contenteditable]{background:linear-gradient(90deg, rgba(11,116,255,0.03), transparent);outline:none}
+td:focus{box-shadow:0 0 0 3px rgba(11,116,255,0.08);border-radius:6px}
+
+/* bottom action bar for mobile */
+.action-bar{
+  position:sticky;
+  bottom:0;
+  left:0;
+  right:0;
+  background:linear-gradient(180deg, rgba(255,255,255,0.6), rgba(255,255,255,0.9));
+  border-top:1px solid var(--border);
+  padding:10px;
+  display:flex;
+  gap:8px;
+  align-items:center;
+  justify-content:space-between;
+  backdrop-filter: blur(6px);
+}
+.action-left{display:flex;gap:8px;align-items:center}
+.copy-msg{font-size:13px;color:var(--success);min-width:160px}
+
+/* responsive tweaks */
+@media (max-width:720px){
+  header{padding:12px}
+  .controls{flex-direction:column;align-items:stretch}
+  .radios{width:100%;display:flex;gap:8px;flex-wrap:wrap}
+  .radio{flex:1 1 auto;justify-content:center}
+  .custom-input{width:100%}
+  .btn{width:100%}
+  .meta{flex-direction:column;align-items:flex-start}
+  .table-wrap{padding:6px}
+  th,td{padding:10px 8px;font-size:13px}
+  .action-bar{padding:12px;flex-direction:column;align-items:stretch}
+  .action-left{width:100%;display:flex;gap:8px}
+  .copy-msg{text-align:left}
+}
+
+/* accessibility focus */
+.radio:focus-within{box-shadow:0 0 0 3px rgba(11,116,255,0.08);border-radius:10px}
