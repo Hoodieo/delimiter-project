@@ -35,3 +35,5 @@
   </p>
 
   <p><strong>&copy; HoodieMoodie 2026</strong></p>
+
+  https://delimiter-project.vercel.app/
