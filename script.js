@@ -1,8 +1,13 @@
-/* script.js - lengkap
+/* script.js - gabungan final (update: ignore rows tidak menyalin delimiter)
+   Fitur:
    - Evaluasi hanya untuk pola di dalam tanda siku [ ... ].
    - Operator yang didukung: + - * :
    - Pembagian menggunakan ':' menghasilkan 1 desimal jika bukan integer, dengan koma sebagai pemisah desimal.
    - Fitur download dihapus.
+   - Tambahan: checkbox "ignore" di sisi kiri setiap baris (visual, per-row).
+   - Agregat: Hsum[], Havg[], Vsum[], Vavg[].
+   - Vsum/Vavg hanya menghitung nilai pada baris di atas sel agregat.
+   - Perubahan: jika baris di-ignore, delimiter tidak disertakan saat menyalin baris tersebut.
 */
 
 document.addEventListener('DOMContentLoaded', function () {
@@ -18,24 +23,7 @@ document.addEventListener('DOMContentLoaded', function () {
   const preset = document.getElementById('presetDelims');
   const customDelimInput = document.getElementById('customDelim');
 
-  // ---------- parsing helper (tanpa literal regex berisiko) ----------
-  function findOperatorIndex(s) {
-    const ops = ['+', '*', ':', '-'];
-    for (let i = 0; i < s.length; i++) {
-      const ch = s[i];
-      if (ops.indexOf(ch) !== -1) {
-        if (ch === '-' && i === 0) continue; // minus awal = tanda negatif
-        const left = s.slice(0, i).trim();
-        const right = s.slice(i + 1).trim();
-        if (left === '' || right === '') continue;
-        if (!/[0-9.]$/.test(left)) continue;
-        if (!/^[0-9.-]/.test(right)) continue;
-        return i;
-      }
-    }
-    return -1;
-  }
-
+  // ---------- basic numeric helpers ----------
   function parseNumberString(numStr) {
     if (typeof numStr !== 'string') return NaN;
     const s = numStr.trim().replace(',', '.');
@@ -54,29 +42,22 @@ document.addEventListener('DOMContentLoaded', function () {
     return parseFloat(n.toFixed(6)).toString();
   }
 
-  // ---------------------------
-  // New: helpers untuk evaluasi ekspresi di dalam [ ... ]
-  // - makeTermFromBracket: buat fungsi suku t(n) dari string (mengizinkan 'n' dan angka)
-  // - evaluateInfiniteSeries: hitung sum atau product tak hingga (numerik, sinkron)
-  // ---------------------------
-
+  // ---------- evaluator for bracket expressions (supports 'n' for series) ----------
+  // NOTE: This implementation uses new Function like original v1.
+  // It accepts expressions with ':' replaced by '/' and '^' -> '**'.
   function makeTermFromBracket(expr, context = {}) {
     if (typeof expr !== 'string') throw new Error('expr harus string');
-    // hanya izinkan karakter aman: angka, huruf n, spasi, operator, titik, tanda kurung, koma, ^, dan ':'
-    // (kita tidak mengizinkan akses ke Math atau objek lain)
+    // allow digits, n, operators, parentheses, dots, commas, spaces, ^ and colon
     const safePattern = /^[0-9n+\-*/():.\s^,_a-zA-Z]+$/;
     if (!safePattern.test(expr)) throw new Error('Ekspresi mengandung karakter tidak diizinkan');
 
-    // terjemahkan notasi: ':' -> '/', '^' -> '**'
     const jsExpr = expr.replace(/:/g, '/').replace(/\^/g, '**');
 
-    // hanya variabel yang diizinkan: 'n' dan variabel dari context (biasanya tidak ada)
     const varNames = Object.keys(context);
     const params = ['n', ...varNames];
 
     let fn;
     try {
-      // Buat fungsi dinamis: function(n, a, b, ...) { return <jsExpr>; }
       fn = new Function(...params, 'return ' + jsExpr + ';');
     } catch (e) {
       throw new Error('Ekspresi tidak valid: ' + e.message);
@@ -103,24 +84,24 @@ document.addEventListener('DOMContentLoaded', function () {
         s += t;
         if (Math.abs(s - prev) < tol) return s;
         prev = s;
-        // deteksi divergensi praktis: suku besar terus setelah banyak iterasi
         if (n > 10000 && Math.abs(t) > 1e6) throw new Error('Kemungkinan divergen (suku besar terus)');
       }
       throw new Error('Max iterasi tercapai; deret mungkin divergen atau toleransi terlalu kecil');
     }
 
     if (type === 'prod') {
-      // coba gunakan log-sum bila faktor positif untuk stabilitas
       let useLog = true;
       for (let n = start; n < start + 20; n++) {
-        const f = termFunc(n);
+        let f;
+        try { f = termFunc(n); } catch (e) { useLog = false; break; }
         if (!(f > 0)) { useLog = false; break; }
       }
       if (useLog) {
         let logSum = 0;
         let prevLog = 0;
         for (let n = start; n < maxIter; n++) {
-          const f = termFunc(n);
+          let f;
+          try { f = termFunc(n); } catch (e) { throw new Error('Error menghitung faktor n=' + n + ': ' + e.message); }
           if (!(f > 0)) throw new Error(`Faktor non-positif pada n=${n}`);
           logSum += Math.log(f);
           if (Math.abs(logSum - prevLog) < tol) return Math.exp(logSum);
@@ -131,7 +112,8 @@ document.addEventListener('DOMContentLoaded', function () {
         let prod = 1;
         let prev = 0;
         for (let n = start; n < maxIter; n++) {
-          const f = termFunc(n);
+          let f;
+          try { f = termFunc(n); } catch (e) { throw new Error('Error menghitung faktor n=' + n + ': ' + e.message); }
           if (!isFinite(f)) throw new Error(`Faktor tidak finite pada n=${n}`);
           prod *= f;
           if (Math.abs(prod - prev) < tol) return prod;
@@ -145,14 +127,10 @@ document.addEventListener('DOMContentLoaded', function () {
     throw new Error('Tipe tidak dikenali: ' + type);
   }
 
-  // computeWithInfinitySupport sinkron untuk penggunaan internal:
-  // - jika type === 'single' -> evaluasi suku pada n = start
-  // - jika type === 'sum' -> hitung sum tak hingga (sinkron)
   function computeWithInfinitySupportSync(inputExpr, context = {}, opts = {}) {
     const { type = 'sum', start = 0, tol = 1e-12, maxIter = 100000 } = opts;
     let expr = String(inputExpr).trim();
     if (expr.startsWith('[') && expr.endsWith(']')) expr = expr.slice(1, -1).trim();
-    // buat termFunc
     const termFunc = makeTermFromBracket(expr, context);
     if (type === 'single') {
       return termFunc(start);
@@ -160,16 +138,11 @@ document.addEventListener('DOMContentLoaded', function () {
     return evaluateInfiniteSeries({ type, termFunc, start, tol, maxIter });
   }
 
-  // expose minimal function globally if needed (tidak wajib)
   if (typeof window !== 'undefined') window.computeWithInfinitySupportSync = computeWithInfinitySupportSync;
 
   // ---------------------------
-  // Modifikasi evaluateSimpleExpression:
-  // - Jika ekspresi mengandung 'n' -> coba hitung sum tak hingga (sinkron)
-  // - Jika tidak -> dukung banyak operand seperti [2+2+50+30] -> 84
+  // Tokenizer & evaluator untuk ekspresi numerik sederhana (banyak operand)
   // ---------------------------
-
-  // Tokenize expression into numbers and operators (supports unary minus)
   function tokenizeExpression(s) {
     const tokens = [];
     let i = 0;
@@ -177,23 +150,18 @@ document.addEventListener('DOMContentLoaded', function () {
     while (i < len) {
       const ch = s[i];
       if (ch === ' ' || ch === '\t') { i++; continue; }
-      // operator
       if (ch === '+' || ch === '*' || ch === ':' ) {
         tokens.push({ type: 'op', value: ch });
         i++; continue;
       }
       if (ch === '-') {
-        // could be unary minus if at start or after another operator
         const prev = tokens.length ? tokens[tokens.length - 1] : null;
         if (!prev || (prev.type === 'op')) {
-          // parse number with leading minus
           let j = i + 1;
           let numStr = '-';
-          let dotCount = 0;
           while (j < len) {
             const c = s[j];
             if ((c >= '0' && c <= '9') || c === ',' || c === '.') {
-              if (c === '.' || c === ',') dotCount++;
               numStr += c;
               j++;
             } else break;
@@ -203,12 +171,10 @@ document.addEventListener('DOMContentLoaded', function () {
           i = j;
           continue;
         } else {
-          // binary minus
           tokens.push({ type: 'op', value: '-' });
           i++; continue;
         }
       }
-      // number (digits, dot or comma)
       if ((ch >= '0' && ch <= '9') || ch === '.' || ch === ',') {
         let j = i;
         let numStr = '';
@@ -223,16 +189,13 @@ document.addEventListener('DOMContentLoaded', function () {
         i = j;
         continue;
       }
-      // any other character -> invalid for simple numeric expression
       return null;
     }
     return tokens;
   }
 
-  // Evaluate token list with precedence: first * and :, then + and -
   function evalTokenList(tokens) {
     if (!Array.isArray(tokens) || tokens.length === 0) return null;
-    // convert number strings to numeric values
     const vals = [];
     for (let t of tokens) {
       if (t.type === 'num') {
@@ -243,62 +206,53 @@ document.addEventListener('DOMContentLoaded', function () {
         vals.push(t);
       }
     }
-    // first pass: handle * and :
     let i = 0;
-    const pass1 = [];
     while (i < vals.length) {
       const cur = vals[i];
       if (cur.type === 'num') {
-        // lookahead for * or :
         const nextOp = vals[i + 1];
         if (nextOp && nextOp.type === 'op' && (nextOp.value === '*' || nextOp.value === ':')) {
           const right = vals[i + 2];
           if (!right || right.type !== 'num') return null;
           let res;
           if (nextOp.value === '*') res = cur.value * right.value;
-          else { // division
+          else {
             if (right.value === 0) return NaN;
             res = cur.value / right.value;
           }
-          // replace current triple with result and continue (may chain)
           vals.splice(i, 3, { type: 'num', value: res });
-          // do not increment i, re-evaluate at same position (to handle chaining like a * b * c)
           continue;
         } else {
-          pass1.push(cur);
           i++;
         }
       } else {
-        // operator + or - (or unexpected)
-        pass1.push(cur);
         i++;
       }
     }
-
-    // second pass: handle + and - left-to-right
-    if (pass1.length === 0) return null;
-    // must start with number
-    if (pass1[0].type !== 'num') return null;
-    let acc = pass1[0].value;
+    if (vals.length === 0) return null;
+    if (vals[0].type !== 'num') return null;
+    let acc = vals[0].value;
     i = 1;
-    while (i < pass1.length) {
-      const op = pass1[i];
-      const right = pass1[i + 1];
+    while (i < vals.length) {
+      const op = vals[i];
+      const right = vals[i + 1];
       if (!op || !right || op.type !== 'op' || right.type !== 'num') return null;
       if (op.value === '+') acc = acc + right.value;
       else if (op.value === '-') acc = acc - right.value;
-      else return null; // unexpected operator here
+      else return null;
       i += 2;
     }
     return acc;
   }
 
+  // ---------------------------
+  // evaluateSimpleExpression: mendukung n (deret) dan banyak operand
+  // ---------------------------
   function evaluateSimpleExpression(expr) {
     if (typeof expr !== 'string') return null;
     const s = expr.trim();
     if (s.length === 0) return null;
 
-    // jika mengandung 'n' -> deret tak hingga (sum)
     if (/\bn\b/.test(s)) {
       try {
         const val = computeWithInfinitySupportSync('[' + s + ']', {}, { type: 'sum' });
@@ -308,25 +262,18 @@ document.addEventListener('DOMContentLoaded', function () {
       }
     }
 
-    // tokenisasi untuk mendukung banyak operand, unary minus, dan operator + - * :
     const tokens = tokenizeExpression(s);
     if (!tokens) return null;
-
-    // validate tokens sequence: must alternate num op num op ...
     if (tokens.length === 0) return null;
-    // quick check: first token must be num
     if (tokens[0].type !== 'num') return null;
 
-    // evaluate with precedence
     const numericResult = evalTokenList(tokens);
     if (numericResult === null) return null;
     if (!isFinite(numericResult)) return null;
 
-    // If original expression contained ':' (division) and no 'n', format division style (1 decimal, comma)
     if (s.indexOf(':') !== -1) {
       return formatDivisionResult(numericResult);
     }
-    // otherwise normal numeric formatting
     return formatNumericResult(numericResult);
   }
 
@@ -449,7 +396,7 @@ document.addEventListener('DOMContentLoaded', function () {
     }
   }
 
-  // ---------- table generation ----------
+  // ---------- table generation (with left ignore checkbox) ----------
   function generateTable(){
     copyMsg.textContent = '';
     const raw = inputText.value.replace(/\r/g,'');
@@ -478,6 +425,12 @@ document.addEventListener('DOMContentLoaded', function () {
     const table = document.createElement('table');
     const thead = document.createElement('thead');
     const trh = document.createElement('tr');
+
+    // extra left header for ignore checkbox column (visual)
+    const thIgnore = document.createElement('th');
+    thIgnore.textContent = ''; // empty header for checkbox column
+    trh.appendChild(thIgnore);
+
     for(let c=0;c<headerCols;c++){
       const th = document.createElement('th');
       th.textContent = 'Kolom ' + (c+1);
@@ -489,6 +442,25 @@ document.addEventListener('DOMContentLoaded', function () {
 
     parsedRows.forEach((r, ri)=>{
       const tr = document.createElement('tr');
+
+      // create leftmost checkbox cell
+      const tdCheck = document.createElement('td');
+      tdCheck.classList.add('ignore-toggle-cell');
+      tdCheck.setAttribute('aria-label', 'Ignore row toggle');
+      tdCheck.style.width = '36px';
+      tdCheck.style.textAlign = 'center';
+      tdCheck.style.verticalAlign = 'middle';
+      // checkbox element
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.className = 'row-ignore-checkbox';
+      cb.dataset.rowIndex = ri;
+      cb.title = 'Ignore row';
+      // mark this td so we can skip it in processing
+      tdCheck.dataset.ignoreToggle = 'true';
+      tdCheck.appendChild(cb);
+      tr.appendChild(tdCheck);
+
       if(r.type === 'empty'){
         const td = document.createElement('td');
         td.setAttribute('colspan', headerCols);
@@ -524,6 +496,14 @@ document.addEventListener('DOMContentLoaded', function () {
           tr.appendChild(td);
         });
       }
+
+      // attach checkbox listener to toggle ignored state
+      cb.addEventListener('change', function(){
+        const checked = !!cb.checked;
+        setRowIgnoredState(tr, checked);
+        recomputeHeaderColsAndUI();
+      });
+
       tbody.appendChild(tr);
     });
 
@@ -564,49 +544,232 @@ document.addEventListener('DOMContentLoaded', function () {
     copyMsg.textContent = '';
   });
 
-  // ---------- build output and copy (hanya evaluasi isi dalam [..]) ----------
+  // ---------- per-row ignore helpers ----------
+  function setRowIgnoredState(tr, ignored) {
+    if(ignored) {
+      tr.dataset.ignored = 'true';
+      tr.classList.add('row-ignored');
+      const tds = Array.from(tr.querySelectorAll('td')).filter(td => !td.dataset.ignoreToggle);
+      tds.forEach(td => {
+        td.dataset.prevEditable = td.getAttribute('contenteditable') === 'true' ? 'true' : 'false';
+        td.setAttribute('contenteditable', 'false');
+        td.classList.add('row-ignored-cell');
+      });
+    } else {
+      delete tr.dataset.ignored;
+      tr.classList.remove('row-ignored');
+      const tds = Array.from(tr.querySelectorAll('td')).filter(td => !td.dataset.ignoreToggle);
+      tds.forEach(td => {
+        // restore editable state (if previously editable, set true; otherwise still true to keep UX consistent)
+        if(td.dataset.prevEditable === 'true') {
+          td.setAttribute('contenteditable', 'true');
+        } else {
+          td.setAttribute('contenteditable', 'true');
+        }
+        delete td.dataset.prevEditable;
+        td.classList.remove('row-ignored-cell');
+      });
+    }
+  }
+
+  // recompute header columns: find first tbody row that is not ignored and not empty
+  function recomputeHeaderColsAndUI() {
+    const table = document.querySelector('#tableWrap table');
+    if(!table) return;
+    const tbodyRows = Array.from(table.querySelectorAll('tbody tr'));
+    let headerCols = 1;
+    for(const tr of tbodyRows) {
+      if(tr.dataset.ignored === 'true') continue;
+      const emptyCell = tr.querySelector('td[data-empty-row="true"]');
+      if(emptyCell) {
+        const txt = emptyCell.textContent.replace(/\s+/g,'').trim();
+        if(txt === '') continue;
+        headerCols = 1;
+        break;
+      } else {
+        const tds = Array.from(tr.querySelectorAll('td')).filter(td => !td.dataset.ignoreToggle);
+        const cellsText = tds.map(td => td.textContent.replace(/\s+/g,'').trim());
+        const allEmpty = cellsText.every(t => t === '');
+        if(allEmpty) continue;
+        headerCols = tds.length;
+        break;
+      }
+    }
+    const thead = table.querySelector('thead');
+    if(thead) {
+      const trh = thead.querySelector('tr');
+      if(trh) {
+        trh.innerHTML = '';
+        const thIgnore = document.createElement('th');
+        thIgnore.textContent = '';
+        trh.appendChild(thIgnore);
+        for(let c=0;c<headerCols;c++){
+          const th = document.createElement('th');
+          th.textContent = 'Kolom ' + (c+1);
+          trh.appendChild(th);
+        }
+      }
+    }
+    const colCountEl = document.getElementById('colCount');
+    if(colCountEl) colCountEl.textContent = String(headerCols);
+  }
+
+  // ---------- build output and copy (evaluasi isi dalam [..], dukung agregat, hormati ignore) ----------
   function buildOutputText(){
     const delim = getSelectedDelimiter();
     const table = tableWrap.querySelector('table');
     if(!table) return '';
-    const headerCols = table.querySelectorAll('thead th').length || 1;
+    // headerCols is number of data columns (excluding checkbox column)
+    const headerCols = table.querySelectorAll('thead th').length ? table.querySelectorAll('thead th').length - 1 : 1;
     const rows = Array.from(table.querySelectorAll('tbody tr'));
     const outLines = [];
 
-    rows.forEach(tr=>{
-      const emptyCell = tr.querySelector('td[data-empty-row="true"]');
-      if(emptyCell){
+    // Build rawTexts matrix and aggFlags matrix
+    const rawMatrix = rows.map(tr => {
+      // exclude ignore-toggle cell (first td)
+      const tds = Array.from(tr.querySelectorAll('td')).filter(td => !td.dataset.ignoreToggle);
+      // if empty-row (colspan) it will be single td with data-empty-row
+      return tds.map(td => td.textContent.replace(/\r/g,'').replace(/\n+/g,' ').trim());
+    });
+
+    const aggMatrix = rawMatrix.map(row => row.map(cellText => {
+      const low = String(cellText).trim().toLowerCase();
+      if (low === 'hsum[]') return 'Hsum';
+      if (low === 'havg[]') return 'Havg';
+      if (low === 'vsum[]') return 'Vsum';
+      if (low === 'vavg[]') return 'Vavg';
+      return null;
+    }));
+
+    // First pass: process non-aggregate cells (evaluate bracket expressions)
+    const processedMatrix = rawMatrix.map((row, ri) => row.map((cellText, ci) => {
+      if (aggMatrix[ri][ci]) return null; // placeholder for aggregate
+      return processBracketExpressions(cellText);
+    }));
+
+    // Helper: collect numeric values from an array of processed strings
+    function collectNumericFromArray(arr) {
+      const nums = [];
+      arr.forEach(v => {
+        if (v === null || v === undefined) return;
+        const n = parseNumberString(String(v));
+        if (!isNaN(n)) nums.push(n);
+      });
+      return nums;
+    }
+
+    // Now compute final cells row by row
+    for (let r = 0; r < rawMatrix.length; r++) {
+      const tr = rows[r];
+      const isIgnored = tr && tr.dataset.ignored === 'true';
+      // if this row is an "empty" single-cell row (colspan), handle separately
+      const emptyCell = tr ? tr.querySelector('td[data-empty-row="true"]') : null;
+      if (emptyCell) {
         const txtRaw = emptyCell.textContent.replace(/\r/g,'').replace(/\n+/g,' ').trim();
         const txtProcessed = processBracketExpressions(txtRaw);
-        if(txtProcessed === ''){
+        if (txtProcessed === '') {
           outLines.push('');
         } else {
-          const currentDelim = getSelectedDelimiter();
-          const delimForCheck = currentDelim === '\t' ? '\t' : currentDelim;
-          if(txtProcessed.includes(delimForCheck)){
-            const parts = splitLine(txtProcessed, currentDelim);
-            while(parts.length < headerCols) parts.push('');
-            outLines.push(trimAll(parts).join(currentDelim));
+          if (isIgnored) {
+            // ignored single-cell row: copy as-is (no delimiter processing)
+            outLines.push(txtProcessed);
           } else {
-            const parts = [txtProcessed];
-            while(parts.length < headerCols) parts.push('');
-            outLines.push(trimAll(parts).join(currentDelim));
+            const currentDelim = getSelectedDelimiter();
+            const delimForCheck = currentDelim === '\t' ? '\t' : currentDelim;
+            if(txtProcessed.includes(delimForCheck)){
+              const parts = splitLine(txtProcessed, currentDelim);
+              while(parts.length < headerCols) parts.push('');
+              outLines.push(trimAll(parts).join(currentDelim));
+            } else {
+              const parts = [txtProcessed];
+              while(parts.length < headerCols) parts.push('');
+              outLines.push(trimAll(parts).join(currentDelim));
+            }
           }
         }
-      } else {
-        const tds = Array.from(tr.querySelectorAll('td'));
-        const cells = tds.map(td => {
-          const raw = td.textContent.replace(/\r/g,'').replace(/\n+/g,' ').trim();
-          return processBracketExpressions(raw);
-        });
-        const allEmpty = cells.every(c => c === '');
-        if(allEmpty){
-          outLines.push('');
-        } else {
-          outLines.push(cells.join(getSelectedDelimiter()));
+        continue;
+      }
+
+      // For normal rows:
+      const finalCells = [];
+      // collect numeric values for this row (exclude aggregate cells and ignore if row ignored)
+      const rowNumericValues = [];
+      if (!isIgnored) {
+        for (let ci = 0; ci < headerCols; ci++) {
+          if (aggMatrix[r][ci]) continue;
+          const v = processedMatrix[r] ? processedMatrix[r][ci] : null;
+          if (v === null || v === undefined) continue;
+          const n = parseNumberString(String(v));
+          if (!isNaN(n)) rowNumericValues.push(n);
         }
       }
-    });
+
+      for (let c = 0; c < headerCols; c++) {
+        const aggType = aggMatrix[r][c];
+        if (!aggType) {
+          const val = processedMatrix[r] ? processedMatrix[r][c] : '';
+          finalCells.push(val === null || val === undefined ? '' : String(val));
+        } else {
+          if (isIgnored) {
+            // if row ignored, treat aggregate cell as empty
+            finalCells.push('');
+            continue;
+          }
+
+          if (aggType === 'Hsum') {
+            if (rowNumericValues.length === 0) {
+              finalCells.push('');
+            } else {
+              const s = rowNumericValues.reduce((a,b)=>a+b, 0);
+              finalCells.push(formatNumericResult(s));
+            }
+          } else if (aggType === 'Havg') {
+            if (rowNumericValues.length === 0) {
+              finalCells.push('');
+            } else {
+              const s = rowNumericValues.reduce((a,b)=>a+b, 0);
+              const avg = s / rowNumericValues.length;
+              finalCells.push(formatNumericResult(avg));
+            }
+          } else if (aggType === 'Vsum' || aggType === 'Vavg') {
+            // NEW: collect numeric values only from rows ABOVE the current row (0 .. r-1)
+            const colNums = [];
+            for (let rr = 0; rr < r; rr++) {
+              const trAbove = rows[rr];
+              if (trAbove && trAbove.dataset.ignored === 'true') continue; // skip ignored rows
+              // skip aggregate cells in above rows
+              if (aggMatrix[rr] && aggMatrix[rr][c]) continue;
+              const vAbove = processedMatrix[rr] ? processedMatrix[rr][c] : null;
+              if (vAbove === null || vAbove === undefined) continue;
+              const n = parseNumberString(String(vAbove));
+              if (!isNaN(n)) colNums.push(n);
+            }
+            if (colNums.length === 0) {
+              finalCells.push('');
+            } else {
+              const s = colNums.reduce((a,b)=>a+b, 0);
+              if (aggType === 'Vsum') {
+                finalCells.push(formatNumericResult(s));
+              } else {
+                const avg = s / colNums.length;
+                finalCells.push(formatNumericResult(avg));
+              }
+            }
+          } else {
+            finalCells.push('');
+          }
+        }
+      }
+
+      const allEmpty = finalCells.every(c => c === '' || c === null);
+      if (allEmpty) {
+        outLines.push('');
+      } else {
+        // IMPORTANT: jika baris di-ignore, gabungkan tanpa delimiter
+        const line = isIgnored ? finalCells.join('') : finalCells.join(getSelectedDelimiter());
+        outLines.push(line);
+      }
+    }
 
     return outLines.join('\n');
   }
@@ -635,6 +798,20 @@ document.addEventListener('DOMContentLoaded', function () {
   }
 
   copyBtnTop.addEventListener('click', copyToClipboard);
+
+  // style injection for ignored rows (visual)
+  (function injectStyles(){
+    if(document.getElementById('ignoreStyles')) return;
+    const s = document.createElement('style');
+    s.id = 'ignoreStyles';
+    s.textContent = `
+      .row-ignored td { opacity: 0.85; background: linear-gradient(90deg, rgba(0,0,0,0.02), transparent); }
+      .row-ignored-cell { background: linear-gradient(90deg, rgba(200,200,200,0.03), transparent) !important; }
+      td.ignore-toggle-cell { width:36px; text-align:center; }
+      .row-ignore-checkbox { width:16px; height:16px; }
+    `;
+    document.head.appendChild(s);
+  })();
 
   // initial state
   activeDelimEl.textContent = '/';
