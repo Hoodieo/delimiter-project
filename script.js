@@ -1,4 +1,4 @@
-/* script.js - gabungan final (update: ignore rows tidak menyalin delimiter)
+/* script.js - gabungan final (update: Vavg/Havg tampil 1 digit di belakang koma)
    Fitur:
    - Evaluasi hanya untuk pola di dalam tanda siku [ ... ].
    - Operator yang didukung: + - * :
@@ -8,6 +8,7 @@
    - Agregat: Hsum[], Havg[], Vsum[], Vavg[].
    - Vsum/Vavg hanya menghitung nilai pada baris di atas sel agregat.
    - Perubahan: jika baris di-ignore, delimiter tidak disertakan saat menyalin baris tersebut.
+   - Perubahan terbaru: Havg[] dan Vavg[] hanya menampilkan 1 digit di belakang koma (koma sebagai pemisah desimal).
 */
 
 document.addEventListener('DOMContentLoaded', function () {
@@ -40,6 +41,12 @@ document.addEventListener('DOMContentLoaded', function () {
   function formatNumericResult(n) {
     if (Number.isInteger(n)) return String(n);
     return parseFloat(n.toFixed(6)).toString();
+  }
+
+  // NEW: format untuk average (1 digit di belakang koma, koma sebagai pemisah)
+  function formatAvgResult(n) {
+    if (Number.isInteger(n)) return String(n);
+    return n.toFixed(1).replace('.', ',');
   }
 
   // ---------- evaluator for bracket expressions (supports 'n' for series) ----------
@@ -729,7 +736,8 @@ document.addEventListener('DOMContentLoaded', function () {
             } else {
               const s = rowNumericValues.reduce((a,b)=>a+b, 0);
               const avg = s / rowNumericValues.length;
-              finalCells.push(formatNumericResult(avg));
+              // use 1 digit di belakang koma untuk average
+              finalCells.push(formatAvgResult(avg));
             }
           } else if (aggType === 'Vsum' || aggType === 'Vavg') {
             // NEW: collect numeric values only from rows ABOVE the current row (0 .. r-1)
@@ -752,7 +760,8 @@ document.addEventListener('DOMContentLoaded', function () {
                 finalCells.push(formatNumericResult(s));
               } else {
                 const avg = s / colNums.length;
-                finalCells.push(formatNumericResult(avg));
+                // use 1 digit di belakang koma untuk average
+                finalCells.push(formatAvgResult(avg));
               }
             }
           } else {
